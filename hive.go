@@ -1167,6 +1167,9 @@ func (c *Cursor) Close() {
 func (c *Cursor) GetStatus(ctx context.Context) int {
 	return c.state
 }
+func (c *Cursor) GetOperationHandle(ctx context.Context) *hiveserver.TOperationHandle {
+	return c.operationHandle
+}
 
 func (c *Cursor) resetState() error {
 	c.response = nil
