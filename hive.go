@@ -9,7 +9,6 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
-	"net/http/cookiejar"
 	"net/url"
 	"os/user"
 	"strconv"
@@ -22,7 +21,6 @@ import (
 	"github.com/beltran/gosasl"
 	"github.com/go-zookeeper/zk"
 	"github.com/pkg/errors"
-	"golang.org/x/net/publicsuffix"
 )
 
 const DEFAULT_FETCH_SIZE int64 = 1000
@@ -31,7 +29,7 @@ const DEFAULT_MAX_LENGTH = 16384000
 
 type DialContextFunc func(ctx context.Context, network, addr string) (net.Conn, error)
 
-// Connection holds the information for getting a cursor to hive.
+// Connection holds the information for getting a cursor to hive
 type Connection struct {
 	host                string
 	port                int
@@ -215,16 +213,19 @@ func innerConnect(ctx context.Context, host string, port int, auth string,
 		}
 	} else {
 		if configuration.TLSConfig != nil {
-			socket = thrift.NewTSSLSocketConf(addr, &thrift.TConfiguration{
+			socket, err = thrift.NewTSSLSocketConf(addr, &thrift.TConfiguration{
 				ConnectTimeout: configuration.ConnectTimeout,
 				SocketTimeout:  configuration.SocketTimeout,
 				TLSConfig:      configuration.TLSConfig,
 			})
 		} else {
-			socket = thrift.NewTSocketConf(addr, &thrift.TConfiguration{
+			socket, err = thrift.NewTSocketConf(addr, &thrift.TConfiguration{
 				ConnectTimeout: configuration.ConnectTimeout,
 				SocketTimeout:  configuration.SocketTimeout,
 			})
+		}
+		if err != nil {
+			return
 		}
 		if err = socket.Open(); err != nil {
 			return
@@ -254,12 +255,6 @@ func innerConnect(ctx context.Context, host string, port int, auth string,
 			if err != nil {
 				return nil, err
 			}
-
-			httpClient.Jar, err = cookiejar.New(&cookiejar.Options{PublicSuffixList: publicsuffix.List})
-			if err != nil {
-				return nil, err
-			}
-
 			httpOptions := thrift.THttpClientOptions{Client: httpClient}
 			transport, err = thrift.NewTHttpClientTransportFactoryWithOptions(fmt.Sprintf(protocol+"://%s:%s@%s:%d/"+configuration.HTTPPath, url.QueryEscape(configuration.Username), url.QueryEscape(configuration.Password), host, port), httpOptions).GetTransport(socket)
 			if err != nil {
@@ -283,10 +278,7 @@ func innerConnect(ctx context.Context, host string, port int, auth string,
 			if err != nil {
 				return nil, err
 			}
-			httpClient.Jar, err = cookiejar.New(&cookiejar.Options{PublicSuffixList: publicsuffix.List})
-			if err != nil {
-				return nil, err
-			}
+			httpClient.Jar = newCookieJar()
 
 			httpOptions := thrift.THttpClientOptions{
 				Client: httpClient,
@@ -370,7 +362,6 @@ func innerConnect(ctx context.Context, host string, port int, auth string,
 
 	if configuration.Database != "" {
 		cursor := connection.Cursor()
-		defer cursor.Close()
 		cursor.Exec(context.Background(), "USE "+configuration.Database)
 		if cursor.Err != nil {
 			return nil, cursor.Err
@@ -378,29 +369,6 @@ func innerConnect(ctx context.Context, host string, port int, auth string,
 	}
 
 	return connection, nil
-}
-
-type CookieDedupTransport struct {
-	http.RoundTripper
-}
-
-// RoundTrip removes duplicate cookies (cookies with the same name) from the request
-// This is a mitigation for the issue where Hive/Impala cookies get duplicated in the response
-func (d *CookieDedupTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	cookieMap := map[string]string{}
-	for _, cookie := range req.Cookies() {
-		cookieMap[cookie.Name] = cookie.Value
-	}
-
-	req.Header.Set("Cookie", "")
-
-	for key, value := range cookieMap {
-		req.AddCookie(&http.Cookie{Name: key, Value: value})
-	}
-
-	resp, err := d.RoundTripper.RoundTrip(req)
-
-	return resp, err
 }
 
 func getHTTPClient(configuration *ConnectConfiguration) (httpClient *http.Client, protocol string, err error) {
@@ -424,9 +392,6 @@ func getHTTPClient(configuration *ConnectConfiguration) (httpClient *http.Client
 		}
 		protocol = "http"
 	}
-
-	httpClient.Transport = &CookieDedupTransport{httpClient.Transport}
-
 	return
 }
 
@@ -502,7 +467,7 @@ func (c *Cursor) WaitForCompletion(ctx context.Context) {
 		}
 	}()
 
-	for true {
+	for {
 		operationStatus := c.Poll(true)
 		if c.Err != nil {
 			return
@@ -676,7 +641,7 @@ func (c *Cursor) FetchLogs() []string {
 	logRequest.FetchType = 1
 
 	resp, err := c.conn.client.FetchResults(context.Background(), logRequest)
-	if err != nil || resp == nil || resp.Results == nil {
+	if err != nil {
 		c.Err = err
 		return nil
 	}
@@ -1260,6 +1225,41 @@ func getTotalRows(columns []*hiveserver.TColumn) (int, error) {
 		}
 	}
 	return 0, errors.New("All columns seem empty")
+}
+
+type inMemoryCookieJar struct {
+	given   *bool
+	storage map[string][]http.Cookie
+}
+
+func (jar inMemoryCookieJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
+	for _, cookie := range cookies {
+		jar.storage["cliservice"] = []http.Cookie{*cookie}
+	}
+	*jar.given = false
+}
+
+func (jar inMemoryCookieJar) Cookies(u *url.URL) []*http.Cookie {
+	cookiesArray := []*http.Cookie{}
+	for pattern, cookies := range jar.storage {
+		if strings.Contains(u.String(), pattern) {
+			for i := range cookies {
+				cookiesArray = append(cookiesArray, &cookies[i])
+			}
+		}
+	}
+	if !*jar.given {
+		*jar.given = true
+		return cookiesArray
+	} else {
+		return nil
+	}
+}
+
+func newCookieJar() inMemoryCookieJar {
+	storage := make(map[string][]http.Cookie)
+	f := false
+	return inMemoryCookieJar{&f, storage}
 }
 
 func safeStatus(status *hiveserver.TStatus) *hiveserver.TStatus {

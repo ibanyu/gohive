@@ -34,22 +34,18 @@ function install_deps() {
     fi
     pushd dhive
     #git reset --hard 750e11b9c07d79d97aea1e182ef12965fc4e922d
-    sed -i.bak 's/python3/python3.8/g' ./Makefile
+    sed -i.bak 's/python3/python3.7.1/g' ./Makefile
     sed -i.bak 's/\.load/\.safe_load/g' ./dhive.py
-    sed -i.bak 's/centos:8/centos:7\nRUN sed -i s\/mirror.centos.org\/vault.centos.org\/g \/etc\/yum.repos.d\/*.repo\nRUN sed -i s\/^#.*baseurl=http\/baseurl=http\/g \/etc\/yum.repos.d\/*.repo\nRUN sed -i s\/^mirrorlist=http\/#mirrorlist=http\/g \/etc\/yum.repos.d\/*.repo/g' ./dhive/containers/base/Dockerfile
+    sed -i.bak 's/centos:8/centos:7/g' ./dhive/containers/base/Dockerfile
 
-    python3.8 -m pip install --user -r requirements.txt
+    python3.7.1 -m pip install --user -r requirements.txt
     sed -i.bak 's/tez_version.*/tez_version = 0.9.2/g' ./config/hive.cfg
     sed -i.bak 's/tez_version.*/tez_version = 0.9.2/g' ./config/hive_and_kerberos.cfg
-    sed -i.bak 's/tez_version.*/tez_version = 0.9.2/g' ./config/hive_and_metastore_and_kerberos.cfg
-    sed -i.bak 's/hive_version.*/hive_version = 3.1.3/g' ./config/hive.cfg
-    sed -i.bak 's/hive_version.*/hive_version = 3.1.3/g' ./config/hive_and_kerberos.cfg
-    sed -i.bak 's/hive_version.*/hive_version = 3.1.3/g' ./config/hive_and_metastore_and_kerberos.cfg
-    sed -i.bak 's/hadoop_version.*/hadoop_version = 2.10.2/g' ./config/hive.cfg
-    sed -i.bak 's/hadoop_version.*/hadoop_version = 2.10.2/g' ./config/hive_and_kerberos.cfg
-    sed -i.bak 's/hadoop_version.*/hadoop_version = 2.10.2/g' ./config/hive_and_metastore_and_kerberos.cfg
+    sed -i.bak 's/hive_version.*/hive_version = 3.1.2/g' ./config/hive.cfg
+    sed -i.bak 's/hive_version.*/hive_version = 3.1.2/g' ./config/hive_and_kerberos.cfg
+    sed -i.bak 's/hadoop_version.*/hadoop_version = 2.10.1/g' ./config/hive.cfg
+    sed -i.bak 's/hadoop_version.*/hadoop_version = 2.10.1/g' ./config/hive_and_kerberos.cfg
     sed -i.bak 's/hive.server2.thrift.sasl.qop.*/hive.server2.thrift.sasl.qop = auth-conf/g' ./config/hive_and_kerberos.cfg
-    sed -i.bak 's/hive.server2.thrift.sasl.qop.*/hive.server2.thrift.sasl.qop = auth-conf/g' ./config/hive_and_metastore_and_kerberos.cfg
     popd
 }
 
@@ -71,7 +67,7 @@ function setHive() {
 
 function tearDown() {
     pushd dhive
-    DHIVE_CONFIG_FILE=config/hive_and_metastore_and_kerberos.cfg make dclean
+    DHIVE_CONFIG_FILE=config/hive_and_kerberos.cfg make dclean
     popd
 }
 
@@ -96,18 +92,16 @@ function bringCredentials() {
 
 function  binaryKerberos() {
   # Tests with binary transport and kerberos authentication
-  setHive config/hive_and_metastore_and_kerberos.cfg
+  setHive config/hive_and_kerberos.cfg
   wait_for_hive || { echo 'Failed waiting for hive' ; exit 1; }
 
   bringCredentials
   export TRANSPORT="binary"
   export AUTH="KERBEROS"
   export SSL="0"
-  export METASTORE_SKIP="0"
   go test -tags "integration kerberos" -race -v -run . || { echo "Failed TRANSPORT=$TRANSPORT, AUTH=$AUTH, SSL=$SSL" ; docker logs hs2.example ; exit 2; }
   go test -tags "integration kerberos" -covermode=count -coverprofile=a.part -v -run . || { echo "Failed TRANSPORT=$TRANSPORT, AUTH=$AUTH, SSL=$SSL" ; docker logs hs2.example ; exit 2; }
   go run -tags "kerberos" example/main.go
-  go run -tags "kerberos" example/main_meta.go
 }
 
 function httpKerberos() {
@@ -120,7 +114,6 @@ function httpKerberos() {
   export TRANSPORT="http"
   export AUTH="KERBEROS"
   export SSL="1"
-  export METASTORE_SKIP="1"
   # go test -tags "integration kerberos" -race -v -run . || { echo "Failed TRANSPORT=$TRANSPORT, AUTH=$AUTH, SSL=$SSL" ; docker logs hs2.example ; exit 2; }
   go test -tags "integration kerberos" -covermode=count -coverprofile=b.part -v -run . || { echo "Failed TRANSPORT=$TRANSPORT, AUTH=$AUTH, SSL=$SSL" ; docker logs hs2.example ; exit 2; }
 }
@@ -133,7 +126,6 @@ function binaryNone() {
   export TRANSPORT="binary"
   export AUTH="NONE"
   export SSL="0"
-  export METASTORE_SKIP="1"
   # go test -tags integration -race -v -run . || { echo "Failed TRANSPORT=$TRANSPORT, AUTH=$AUTH, SSL=$SSL" ; docker logs hs2.example ; exit 2; }
   go test -tags integration -covermode=count -coverprofile=c.part -v -run . || { echo "Failed TRANSPORT=$TRANSPORT, AUTH=$AUTH, SSL=$SSL" ; docker logs hs2.example ; exit 2; }
 
@@ -149,7 +141,7 @@ function run_tests() {
     httpKerberos
     binaryNone
 
-    # goveralls -coverprofile=coverage.out -service=travis-ci
+    goveralls -coverprofile=coverage.out -service=travis-ci
 
     tearDown
 }
