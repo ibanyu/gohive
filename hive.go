@@ -620,7 +620,9 @@ func (c *Cursor) Poll(getProgress bool) (status *hiveserver.TGetOperationStatusR
 	pollRequest.GetProgressUpdate = &progressGet
 	var responsePoll *hiveserver.TGetOperationStatusResp
 	// Context ignored
+	fmt.Println("start GetOperationStatus: ", pollRequest)
 	responsePoll, c.Err = c.conn.client.GetOperationStatus(context.Background(), pollRequest)
+	fmt.Println("end GetOperationStatus: req: ", pollRequest, ", res: ", responsePoll, ", err: ", c.Err)
 	if c.Err != nil {
 		return nil
 	}
