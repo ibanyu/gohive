@@ -1164,6 +1164,9 @@ func (c *Cursor) Cancel() {
 func (c *Cursor) Close() {
 	c.Err = c.resetState()
 }
+func (c *Cursor) GetStatus(ctx context.Context) int {
+	return c.state
+}
 
 func (c *Cursor) resetState() error {
 	c.response = nil
