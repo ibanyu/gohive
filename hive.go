@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unsafe"
 
 	"github.com/apache/thrift/lib/go/thrift"
 	"github.com/beltran/gohive/hiveserver"
@@ -444,6 +445,7 @@ type Cursor struct {
 	newData         bool
 	Err             error
 	description     [][]string
+	query           string
 
 	// Caller is responsible for managing this channel
 	Logs chan<- []string
@@ -524,6 +526,7 @@ func (c *Cursor) Exec(ctx context.Context, query string) {
 
 // Execute sends a query to hive for execution with a context
 func (c *Cursor) Execute(ctx context.Context, query string, async bool) {
+	c.query = query
 	c.executeAsync(ctx, query)
 	if !async {
 		// We cannot trust in setting executeReq.RunAsync = true
@@ -620,9 +623,9 @@ func (c *Cursor) Poll(getProgress bool) (status *hiveserver.TGetOperationStatusR
 	pollRequest.GetProgressUpdate = &progressGet
 	var responsePoll *hiveserver.TGetOperationStatusResp
 	// Context ignored
-	fmt.Println("start GetOperationStatus: ", pollRequest)
+	fmt.Println("== start GetOperationStatus: ", c.query, ", req: ", pollRequest, "!!!===", uintptr(unsafe.Pointer(c)))
 	responsePoll, c.Err = c.conn.client.GetOperationStatus(context.Background(), pollRequest)
-	fmt.Println("end GetOperationStatus: req: ", pollRequest, ", res: ", responsePoll, ", err: ", c.Err)
+	fmt.Println("== end GetOperationStatus: ", c.query, ", req: ", pollRequest, ", res: ", responsePoll, ", err: ", c.Err, "!!!===", uintptr(unsafe.Pointer(c)))
 	if c.Err != nil {
 		return nil
 	}
