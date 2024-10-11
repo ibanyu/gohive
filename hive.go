@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log"
 	"math/rand"
@@ -474,8 +475,10 @@ func (c *Cursor) WaitForCompletion(ctx context.Context) {
 		if c.Err != nil {
 			return
 		}
+		d, _ := json.Marshal(operationStatus)
 		status := operationStatus.OperationState
 		finished := !(*status == hiveserver.TOperationState_INITIALIZED_STATE || *status == hiveserver.TOperationState_RUNNING_STATE || *status == hiveserver.TOperationState_PENDING_STATE)
+		fmt.Println("==status: ", status, ", finished: ", finished, ", log:", c.Logs, "opstaus: ", d, "!!!===", uintptr(unsafe.Pointer(c)))
 		if finished {
 			if *operationStatus.OperationState != hiveserver.TOperationState_FINISHED_STATE {
 				msg := operationStatus.TaskStatus
